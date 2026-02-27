@@ -188,7 +188,7 @@ if __name__ == "__main__":
 
     point_counter = 0
     # Папка с файлами сущностей
-    entities_folder = "data/entities"
+    entities_folder = "data/entities_5_dates"
     file_list = []
     for root, dirs, files in os.walk(entities_folder):
         for file in files:

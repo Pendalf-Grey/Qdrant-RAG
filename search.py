@@ -30,7 +30,8 @@ def parse_query_with_llm(query: str) -> dict:
 
 Извлеки из запроса:
 1. Все даты в формате ДД.ММ (если есть). Пример: "14 марта" → "14.03", "14.03" → "14.03".
-2. Все имена сущностей (если есть). Имена даны в виде латинских названий, например "vehuiah", "jeliel" и т.п.
+2. Все имена сущностей (если есть). НЕ ПРИДУМЫВАЙ имена, если их нет в запросе. Если в запросе нет конкретных имён, оставь пустой список.
+3. Остальной текст для семантического поиска (free_text) — это запрос, из которого удалены все извлечённые даты и имена. Если даты и имена не извлекались, free_text совпадает с исходным запросом.
 
 Ответ выдай строго в формате JSON без пояснений:
 {{
@@ -52,7 +53,7 @@ def parse_query_with_llm(query: str) -> dict:
             "stream": False,
             "options": {"temperature": 0.0}
         },
-        timeout=30
+        timeout=300
     )
     resp.raise_for_status()
     answer = resp.json()["response"]
@@ -79,7 +80,7 @@ def generate_answer(prompt: str, context: str) -> str:
             "prompt": full_prompt,
             "stream": False
         },
-        timeout=60
+        timeout=600
     )
     resp.raise_for_status()
     return resp.json()["response"]
@@ -89,7 +90,7 @@ client = QdrantClient("localhost", port=6333)
 COLLECTION_NAME = "legal_docs"
 
 # ====================== ЗАПРОС ПОЛЬЗОВАТЕЛЯ ======================
-query = "С какими числами связан хаиаиель?"
+query = "перечисли имена"
 print(f"Запрос: {query}")
 
 # 1. Анализируем запрос
@@ -143,7 +144,7 @@ response = client.query_points(
     collection_name=COLLECTION_NAME,
     query=query_vector,
     query_filter=filter_condition,
-    limit=10
+    limit=100
 )
 results = response.points
 

@@ -126,10 +126,10 @@ def fetch_chunks(collection_name: str, filter_condition: models.Filter, limit: i
 
 # ====================== ФУНКЦИЯ ГЕНЕРАЦИИ ОТВЕТА ======================
 def generate_answer(prompt: str, context: str) -> str:
-    # Усилим промпт, чтобы LLM отвечала кратко и только по делу
     full_prompt = f"""Ты — помощник, который отвечает на вопросы пользователя, используя только предоставленный контекст. 
-    Отвечай максимально кратко, без лишних пояснений, комментариев или оценок. 
-    Если в контексте есть информация, просто перечисли её в ответ на вопрос. Если есть хотябы одно совпадение - используй его для ответа".
+Отвечай максимально кратко, без лишних пояснений, комментариев или оценок. 
+Если в контексте есть информация, просто перечисли её в ответ на вопрос. 
+Если информация отсутствует, скажи "Информация не найдена".
 
 Контекст:
 {context}
@@ -153,7 +153,7 @@ def generate_answer(prompt: str, context: str) -> str:
 if __name__ == "__main__":
     COLLECTION_NAME = "legal_docs"
 
-    query = "перечисли имена ангелов от 14 марта, 16 февраля, 22 ноября, 17 мая и 1 мая"
+    query = "какие даты соответствуют ангелу хаиаиель?"
     print(f"Запрос: {query}\n")
     print("=" * 60)
 
@@ -184,22 +184,20 @@ if __name__ == "__main__":
     print(f"  Всего получено чанков: {len(results)}")
     print(f"  Время: {t2 - t1:.2f} сек\n")
 
-    # 4. Формируем контекст для LLM (улучшенный)
+    # 4. Формируем контекст для LLM (теперь включаем и даты, и имена)
     print("Этап 4: Формирование контекста для LLM...")
     t1 = time.perf_counter()
 
     if not results:
         context = "Документы не найдены."
     else:
-        # Собираем уникальные имена сущностей
-        names_found = sorted(set(res.payload.get('entity_name', 'неизвестно') for res in results))
-        if dates:
-            date_str = ', '.join(dates)
-            context = f"По вашему запросу (дата: {date_str}) найдены следующие сущности:\n"
-        else:
-            context = "По вашему запросу найдены следующие сущности:\n"
-        for name in names_found:
-            context += f"- {name}\n"
+        context_lines = []
+        for res in results:
+            entity = res.payload.get('entity_name', 'неизвестно')
+            dates_list = res.payload.get('dates', [])
+            dates_str = ', '.join(dates_list) if dates_list else 'нет дат'
+            context_lines.append(f"Сущность: {entity}, даты: {dates_str}")
+        context = "\n".join(context_lines)
 
     t2 = time.perf_counter()
     print(f"  Контекст сформирован (длина: {len(context)} символов)")

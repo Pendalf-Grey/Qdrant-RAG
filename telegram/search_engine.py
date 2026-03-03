@@ -175,16 +175,24 @@ async def process_query(query: str) -> str:
     # 3. Получение чанков из Qdrant
     chunks = await asyncio.to_thread(_fetch_chunks, filter_condition, 100)
 
-    # 4. Формирование контекста (теперь с полной информацией)
+    # 4. Формирование контекста (теперь с учётом наличия имён в запросе)
     if not chunks:
         context = "Документы не найдены."
     else:
-        context_parts = []
-        for chunk in chunks:
-            entity = chunk["entity_name"]
-            dates_str = ', '.join(chunk["dates"]) if chunk["dates"] else "нет дат"
-            context_parts.append(f"Сущность: {entity}\nДаты: {dates_str}")
-        context = "\n\n---\n\n".join(context_parts)
+        # Если в запросе не было конкретных имён, выводим только уникальные имена (без дат)
+        if not entity_names:
+            # Собираем уникальные имена сущностей
+            names_found = sorted(set(chunk["entity_name"] for chunk in chunks))
+            context = "Найденные имена сущностей:\n" + "\n".join(f"- {name}" for name in names_found)
+        else:
+            # Иначе (есть конкретные имена) выводим полную информацию: имя + даты
+            context_lines = []
+            for chunk in chunks:
+                entity = chunk["entity_name"]
+                dates_list = chunk["dates"]
+                dates_str = ', '.join(dates_list) if dates_list else 'нет дат'
+                context_lines.append(f"Сущность: {entity}, даты: {dates_str}")
+            context = "\n".join(context_lines)
 
     logger.info(f"Контекст сформирован, длина {len(context)} символов")
 

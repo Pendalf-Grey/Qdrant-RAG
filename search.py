@@ -153,7 +153,7 @@ def generate_answer(prompt: str, context: str) -> str:
 if __name__ == "__main__":
     COLLECTION_NAME = "legal_docs"
 
-    query = "какие даты соответствуют ангелу хаиаиель?"
+    query = "перечисли все имена ангелов, которые тебе известны"
     print(f"Запрос: {query}\n")
     print("=" * 60)
 
@@ -184,20 +184,27 @@ if __name__ == "__main__":
     print(f"  Всего получено чанков: {len(results)}")
     print(f"  Время: {t2 - t1:.2f} сек\n")
 
-    # 4. Формируем контекст для LLM (теперь включаем и даты, и имена)
+    # 4. Формируем контекст для LLM (теперь с учётом наличия имён в запросе)
     print("Этап 4: Формирование контекста для LLM...")
     t1 = time.perf_counter()
 
     if not results:
         context = "Документы не найдены."
     else:
-        context_lines = []
-        for res in results:
-            entity = res.payload.get('entity_name', 'неизвестно')
-            dates_list = res.payload.get('dates', [])
-            dates_str = ', '.join(dates_list) if dates_list else 'нет дат'
-            context_lines.append(f"Сущность: {entity}, даты: {dates_str}")
-        context = "\n".join(context_lines)
+        # Если в запросе не было конкретных имён, выводим только уникальные имена (без дат)
+        if not entity_names:
+            # Собираем уникальные имена сущностей
+            names_found = sorted(set(res.payload.get('entity_name', 'неизвестно') for res in results))
+            context = "Найденные имена сущностей:\n" + "\n".join(f"- {name}" for name in names_found)
+        else:
+            # Иначе (есть конкретные имена) выводим полную информацию: имя + даты
+            context_lines = []
+            for res in results:
+                entity = res.payload.get('entity_name', 'неизвестно')
+                dates_list = res.payload.get('dates', [])
+                dates_str = ', '.join(dates_list) if dates_list else 'нет дат'
+                context_lines.append(f"Сущность: {entity}, даты: {dates_str}")
+            context = "\n".join(context_lines)
 
     t2 = time.perf_counter()
     print(f"  Контекст сформирован (длина: {len(context)} символов)")

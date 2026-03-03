@@ -1,8 +1,31 @@
 import json
 import requests
 import time
+import re
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
+
+# ====================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ======================
+
+def is_count_query(query: str) -> bool:
+    """
+    Определяет, является ли запрос вопросом о количестве (сколько, количество и т.п.)
+    """
+    q = query.lower().strip()
+    triggers = [
+        r'\bсколько\b',
+        r'\bколичество\b',
+        r'\bчисло\b',
+        r'\bсколько всего\b',
+        r'\bкакое количество\b',
+        r'\bскока\b',
+        r'\bкол-во\b',
+        r'\bцифр[уа]?\b',
+    ]
+    for pattern in triggers:
+        if re.search(pattern, q):
+            return True
+    return False
 
 # ====================== ПАРСИНГ ЗАПРОСА ЧЕРЕЗ LLM ======================
 def parse_query_with_llm(query: str) -> dict:
@@ -129,6 +152,7 @@ def generate_answer(prompt: str, context: str) -> str:
     full_prompt = f"""Ты — помощник, который отвечает на вопросы пользователя, используя только предоставленный контекст. 
 Отвечай максимально кратко, без лишних пояснений, комментариев или оценок. 
 Если в контексте есть информация, просто перечисли её в ответ на вопрос. 
+Если в контексте представлен список имён, перечисли все имена из контекста, ничего не пропуская.
 Если информация отсутствует, скажи "Информация не найдена".
 
 Контекст:
@@ -153,11 +177,16 @@ def generate_answer(prompt: str, context: str) -> str:
 if __name__ == "__main__":
     COLLECTION_NAME = "legal_docs"
 
-    query = "перечисли все имена ангелов, которые тебе известны"
+    query = input("Введите запрос: ").strip()
     print(f"Запрос: {query}\n")
     print("=" * 60)
 
-    # 1. Анализируем запрос через LLM
+    # Определяем, является ли запрос вопросом о количестве (до вызова LLM)
+    is_count = is_count_query(query)
+    if is_count:
+        print("Обнаружен запрос о количестве. Будет выполнен подсчёт без вызова LLM.\n")
+
+    # 1. Анализируем запрос через LLM (всегда нужно для фильтров)
     print("Этап 1: Парсинг запроса LLM...")
     t1 = time.perf_counter()
     parsed = parse_query_with_llm(query)
@@ -184,40 +213,61 @@ if __name__ == "__main__":
     print(f"  Всего получено чанков: {len(results)}")
     print(f"  Время: {t2 - t1:.2f} сек\n")
 
-    # 4. Формируем контекст для LLM (теперь с учётом наличия имён в запросе)
-    print("Этап 4: Формирование контекста для LLM...")
-    t1 = time.perf_counter()
-
-    if not results:
-        context = "Документы не найдены."
-    else:
-        # Если в запросе не было конкретных имён, выводим только уникальные имена (без дат)
-        if not entity_names:
-            # Собираем уникальные имена сущностей
-            names_found = sorted(set(res.payload.get('entity_name', 'неизвестно') for res in results))
-            context = "Найденные имена сущностей:\n" + "\n".join(f"- {name}" for name in names_found)
+    # 4. Если это запрос о количестве – подсчитываем и отвечаем без LLM
+    if is_count:
+        if not results:
+            count = 0
         else:
-            # Иначе (есть конкретные имена) выводим полную информацию: имя + даты
-            context_lines = []
-            for res in results:
-                entity = res.payload.get('entity_name', 'неизвестно')
-                dates_list = res.payload.get('dates', [])
-                dates_str = ', '.join(dates_list) if dates_list else 'нет дат'
-                context_lines.append(f"Сущность: {entity}, даты: {dates_str}")
-            context = "\n".join(context_lines)
+            unique_names = set(res.payload.get('entity_name', 'неизвестно') for res in results)
+            count = len(unique_names)
+        # Формируем ответ с учётом фильтров
+        if dates or entity_names:
+            filters_desc = []
+            if dates:
+                filters_desc.append(f"дата(ы): {', '.join(dates)}")
+            if entity_names:
+                filters_desc.append(f"имя(ена): {', '.join(entity_names)}")
+            filter_str = " с " + " и ".join(filters_desc)
+            answer = f"Найдено {count} уникальных сущностей{filter_str}."
+        else:
+            answer = f"Всего известно {count} ангелов."
+        print("=" * 60)
+        print("ОТВЕТ (подсчёт):")
+        print(answer)
+    else:
+        # 4. Формируем контекст для LLM (с учётом наличия имён в запросе)
+        print("Этап 4: Формирование контекста для LLM...")
+        t1 = time.perf_counter()
 
-    t2 = time.perf_counter()
-    print(f"  Контекст сформирован (длина: {len(context)} символов)")
-    print(f"  Время: {t2 - t1:.2f} сек\n")
-    print("  Содержимое контекста:")
-    print(context)
+        if not results:
+            context = "Документы не найдены."
+        else:
+            # Если в запросе не было конкретных имён, выводим только уникальные имена (без дат)
+            if not entity_names:
+                names_found = sorted(set(res.payload.get('entity_name', 'неизвестно') for res in results))
+                context = "Найденные имена сущностей:\n" + "\n".join(f"- {name}" for name in names_found)
+            else:
+                # Иначе (есть конкретные имена) выводим полную информацию: имя + даты
+                context_lines = []
+                for res in results:
+                    entity = res.payload.get('entity_name', 'неизвестно')
+                    dates_list = res.payload.get('dates', [])
+                    dates_str = ', '.join(dates_list) if dates_list else 'нет дат'
+                    context_lines.append(f"Сущность: {entity}, даты: {dates_str}")
+                context = "\n".join(context_lines)
 
-    # 5. Генерируем ответ
-    print("Этап 5: Генерация ответа LLM...")
-    t1 = time.perf_counter()
-    answer = generate_answer(query, context)
-    t2 = time.perf_counter()
-    print(f"  Время генерации ответа: {t2 - t1:.2f} сек\n")
-    print("=" * 60)
-    print("ОТВЕТ:")
-    print(answer)
+        t2 = time.perf_counter()
+        print(f"  Контекст сформирован (длина: {len(context)} символов)")
+        print(f"  Время: {t2 - t1:.2f} сек\n")
+        print("  Содержимое контекста:")
+        print(context)
+
+        # 5. Генерируем ответ
+        print("Этап 5: Генерация ответа LLM...")
+        t1 = time.perf_counter()
+        answer = generate_answer(query, context)
+        t2 = time.perf_counter()
+        print(f"  Время генерации ответа: {t2 - t1:.2f} сек\n")
+        print("=" * 60)
+        print("ОТВЕТ:")
+        print(answer)
